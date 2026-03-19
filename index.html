@@ -1,0 +1,788 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dealer Visit Scheduler</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: Arial, sans-serif; padding: 16px; background: #f4f4f4; margin: 0; }
+  h1 { font-size: 20px; color: #333; margin-bottom: 16px; }
+  h3 { font-size: 15px; color: #444; margin: 12px 0 8px 0; }
+  .section { background: white; border-radius: 10px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); }
+  label { font-weight: bold; display: block; margin-bottom: 4px; font-size: 14px; }
+  input[type=month], input[type=text], input[type=number] { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; margin-bottom: 8px; }
+  input[type=file] { width: 100%; padding: 8px; border: 2px dashed #93c5fd; border-radius: 6px; font-size: 14px; margin-bottom: 8px; background: #eff6ff; cursor: pointer; }
+  button { background: #2563eb; color: white; border: none; padding: 10px 20px; border-radius: 8px; font-size: 15px; cursor: pointer; margin-top: 4px; }
+  button:hover { background: #1d4ed8; }
+  .btn-green { background: #059669; }
+  .btn-green:hover { background: #047857; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { background: #2563eb; color: white; padding: 8px; text-align: left; }
+  td { padding: 6px 8px; border-bottom: 1px solid #e5e7eb; vertical-align: middle; }
+  .day-even { background: #ffffff; }
+  .day-odd  { background: #f1f5f9; }
+  .badge { display: inline-block; padding: 2px 7px; border-radius: 12px; font-size: 11px; font-weight: bold; color: white; }
+  .badge-weekly  { background: #059669; }
+  .badge-monthly { background: #9ca3af; }
+  .badge-call    { background: #6366f1; }
+  .seg-red    { background: #ef4444; }
+  .seg-orange { background: #f97316; }
+  .seg-yellow { background: #ca8a04; }
+  .seg-green  { background: #16a34a; }
+  .seg-high   { background: #7c3aed; }
+  .seg-blank  { background: #9ca3af; }
+  .week-divider td { background: #dbeafe !important; font-weight: bold; color: #1e40af; font-size: 12px; padding: 5px 8px; }
+  .stats { display: flex; gap: 10px; flex-wrap: wrap; }
+  .stat-box { background: #eff6ff; border-radius: 8px; padding: 10px 14px; flex: 1; min-width: 80px; text-align: center; }
+  .stat-box .num { font-size: 22px; font-weight: bold; color: #2563eb; }
+  .stat-box .lbl { font-size: 11px; color: #6b7280; }
+  .error { background: #fee2e2; color: #991b1b; padding: 10px; border-radius: 6px; margin-bottom: 8px; font-size: 13px; }
+  .success { background: #d1fae5; color: #065f46; padding: 10px; border-radius: 6px; margin-bottom: 8px; font-size: 13px; }
+  .objection-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .objection-toggle { display: flex; align-items: center; gap: 6px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 6px 10px; font-size: 13px; }
+  .objection-toggle.active { background: #fee2e2; border-color: #fca5a5; color: #991b1b; }
+  .objection-toggle input { margin: 0; cursor: pointer; }
+  .unscheduled-section { margin-top: 16px; }
+  .unscheduled-section h3 { color: #b45309; }
+  #schedule-output { overflow-x: auto; }
+  .play-tag { font-size: 11px; color: #7c3aed; font-style: italic; }
+  .priority-star { color: #f59e0b; margin-right: 3px; }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 600px) { .two-col { grid-template-columns: 1fr; } }
+  @media print {
+    .no-print { display: none; }
+    body { padding: 0; background: white; }
+    .section { box-shadow: none; border: 1px solid #e5e7eb; }
+  }
+</style>
+</head>
+<body>
+
+<h1>🚗 Dealer Visit Scheduler</h1>
+
+<div class="section no-print">
+  <label>Step 1 — Upload your Oracle Excel export</label>
+  <small style="color:#6b7280;display:block;margin-bottom:8px">
+    Accepts .xlsx files. Required columns: Name, Dealer ID, Sales Step, Segment, City, Sales Play, CA Objection(s), Equity
+  </small>
+  <input type="file" id="fileInput" accept=".xlsx" onchange="handleFile(this)">
+  <div id="file-status"></div>
+</div>
+
+<div class="section no-print" id="filter-section" style="display:none">
+  <h3>Step 2 — Configure Filters</h3>
+  <div class="two-col">
+    <div>
+      <label>Equity Threshold (Steps 01 &amp; 02 only)</label>
+      <small style="color:#6b7280;display:block;margin-bottom:6px">Dealers below this removed unless they have a Sales Play</small>
+      <input type="number" id="equityThreshold" value="-20000" style="width:160px">
+    </div>
+    <div>
+      <label>Max Visits Per Day</label>
+      <small style="color:#6b7280;display:block;margin-bottom:6px">Priority dealers may go up to 2 over this</small>
+      <input type="number" id="visitsPerDay" value="6" style="width:80px">
+    </div>
+  </div>
+  <label style="margin-top:12px">CA Objections to Filter Out</label>
+  <small style="color:#6b7280;display:block;margin-bottom:6px">Checked objections remove the dealer. Sales Play always overrides.</small>
+  <div class="objection-grid" id="objection-toggles"></div>
+  <div style="margin-top:12px">
+    <label>Manually Remove Dealers by ID</label>
+    <small style="color:#6b7280;display:block;margin-bottom:6px">Comma separated Dealer IDs</small>
+    <input type="text" id="manualRemove" placeholder="e.g. AL3T, CB66">
+  </div>
+</div>
+
+<div class="section no-print" id="schedule-section" style="display:none">
+  <h3>Step 3 — Schedule Options</h3>
+  <div class="two-col">
+    <div>
+      <label>Month to Schedule</label>
+      <input type="month" id="monthPicker" value="2026-04">
+    </div>
+    <div>
+      <label>Blackout Dates (comma separated)</label>
+      <input type="text" id="blackouts" placeholder="e.g. 4/3/2026, 4/17/2026">
+    </div>
+  </div>
+  <button onclick="generateSchedule()">Generate Schedule</button>
+  <button class="btn-green" onclick="window.print()" style="margin-left:8px">Print / Save PDF</button>
+</div>
+
+<div id="stats-section" style="display:none" class="section">
+  <div class="stats" id="stats"></div>
+</div>
+<div class="section" id="schedule-output"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+
+// ─────────────────────────────────────────────────────────────────────
+// CONSTANTS
+// ─────────────────────────────────────────────────────────────────────
+var MIN_PER_DAY  = 5;
+var MAX_OVERFLOW = 2;
+var COMBINED_CAP = 10;
+
+// ─────────────────────────────────────────────────────────────────────
+// GEOGRAPHY
+// ─────────────────────────────────────────────────────────────────────
+var CLUSTERS = ['NW-Hammond','NW-Gary','Central','North','Valpo','LaPorte','Knox'];
+
+var CITY_TO_CLUSTER = {
+  'HAMMOND':'NW-Hammond','WHITING':'NW-Hammond','EAST CHICAGO':'NW-Hammond',
+  'GRIFFITH':'NW-Gary','GARY':'NW-Gary','LAKE STATION':'NW-Gary',
+  'HOBART':'Central','MERRILLVILLE':'Central',
+  'PORTAGE':'North','CHESTERTON':'North','BURNS HARBOR':'North','WANATAH':'North',
+  'VALPARAISO':'Valpo',
+  'LA PORTE':'LaPorte','LAPORTE':'LaPorte','MICHIGAN CITY':'LaPorte','TRAIL CREEK':'LaPorte',
+  'KNOX':'Knox'
+};
+
+function getCluster(city){
+  var c = CITY_TO_CLUSTER[(city||'').toUpperCase().trim()];
+  return c || 'Central';
+}
+
+function clusterDist(a, b){
+  if(a === b) return 0;
+  var ia = CLUSTERS.indexOf(a), ib = CLUSTERS.indexOf(b);
+  if(ia < 0 || ib < 0) return 4;
+  return Math.abs(ia - ib);
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// BUSINESS RULES
+// ─────────────────────────────────────────────────────────────────────
+function clean(val){
+  var s = (val === null || val === undefined) ? '' : String(val).trim();
+  if(s === '-' || s === '--') return '';
+  if(s.toLowerCase() === 'n/a' || s.toLowerCase() === 'none') return '';
+  if(s === '0') return '';
+  return s;
+}
+
+function hasPlay(dealer){
+  return clean(dealer.salesPlay) !== '';
+}
+
+function calcFreq(dealer){
+  if(hasPlay(dealer)) return 'Weekly';
+  var s = clean(dealer.step);
+  if(s.startsWith('03') || s.startsWith('05')) return 'Weekly';
+  return 'Monthly';
+}
+
+function calcContactType(dealer){
+  if(hasPlay(dealer)) return 'visit';
+  var s = clean(dealer.step);
+  if(s.startsWith('03') || s.startsWith('05')) return 'visit';
+  if(clean(dealer.segment).toLowerCase() === 'red') return 'call';
+  return 'visit';
+}
+
+function isPriority(dealer){
+  var seg = clean(dealer.segment).toLowerCase();
+  return seg === 'orange' || seg === 'yellow' || seg === 'high' || hasPlay(dealer);
+}
+
+function isGreen(dealer){
+  return clean(dealer.segment).toLowerCase() === 'green';
+}
+
+function schedPri(dealer){
+  var p = isPriority(dealer), g = isGreen(dealer), w = dealer.freq === 'Weekly';
+  if(p && w)  return 1;
+  if(p && !w) return 2;
+  if(g && w)  return 3;
+  if(g && !w) return 4;
+  if(w)       return 5;
+  return 6;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// EXCEL FILE HANDLER
+// ─────────────────────────────────────────────────────────────────────
+var loadedDealers = [];
+var allObjections = [];
+
+function handleFile(input){
+  var file = input.files[0];
+  if(!file) return;
+
+  var reader = new FileReader();
+  reader.onload = function(e){
+    try{
+      var data = new Uint8Array(e.target.result);
+      var wb   = XLSX.read(data, {type:'array'});
+      var ws   = wb.Sheets[wb.SheetNames[0]];
+      var rows = XLSX.utils.sheet_to_json(ws, {defval:''});
+
+      if(!rows.length){
+        showFileStatus('No data found in the file.', true); return;
+      }
+
+      var sample = rows[0];
+      function findKey(candidates){
+        var keys = Object.keys(sample);
+        for(var ci = 0; ci < candidates.length; ci++){
+          var cand = candidates[ci];
+          for(var ki = 0; ki < keys.length; ki++){
+            var k = keys[ki];
+            if(k.toLowerCase().replace(/[^a-z0-9]/g,'').indexOf(
+               cand.toLowerCase().replace(/[^a-z0-9]/g,'')) >= 0){
+              return k;
+            }
+          }
+        }
+        return null;
+      }
+
+      var kName   = findKey(['name']);
+      var kId     = findKey(['dealerid','dealer id']);
+      var kStep   = findKey(['salesstep','sales step','step']);
+      var kDate   = findKey(['lastactivity','last activity','activity','date']);
+      var kSeg    = findKey(['segment']);
+      var kCity   = findKey(['city']);
+      var kState  = findKey(['state']);
+      var kAddr   = findKey(['address']);
+      var kPlay   = findKey(['salesplay','sales play','play']);
+      var kEquity = findKey(['equity']);
+      var kObj    = findKey(['caobjection','ca objection','objection']);
+
+      if(!kName){ showFileStatus('Could not find a Name column.', true); return; }
+      if(!kStep){ showFileStatus('Could not find a Sales Step column.', true); return; }
+
+      var dealers = [];
+      var objSet  = {};
+
+      for(var ri = 0; ri < rows.length; ri++){
+        var row  = rows[ri];
+        var name = clean(row[kName]);
+        var step = clean(row[kStep]);
+        if(!name) continue;
+        var sl = step.toLowerCase();
+        if(sl.indexOf('out of business') >= 0 || sl.indexOf('unqualified') >= 0) continue;
+
+        var play   = kPlay   ? clean(row[kPlay])   : '';
+        var seg    = kSeg    ? clean(row[kSeg])    : '';
+        var city   = kCity   ? clean(row[kCity])   : '';
+        var objRaw = kObj    ? clean(row[kObj])    : '';
+        var eqRaw  = kEquity ? clean(row[kEquity]) : '';
+        var equity = eqRaw ? parseFloat(eqRaw.replace(/[$,\s]/g,'')) : null;
+
+        var objList = objRaw ? objRaw.split(',').map(function(o){return o.trim();}).filter(Boolean) : [];
+        for(var oi = 0; oi < objList.length; oi++){ objSet[objList[oi]] = true; }
+
+        var d = {
+          name:      name,
+          id:        kId    ? clean(row[kId])    : '',
+          step:      step,
+          lastDate:  kDate  ? clean(row[kDate])  : '',
+          segment:   seg,
+          city:      city,
+          state:     kState ? clean(row[kState]) : '',
+          address:   kAddr  ? clean(row[kAddr])  : '',
+          salesPlay: play,
+          objections:objList,
+          equity:    isNaN(equity) ? null : equity,
+          cluster:   getCluster(city)
+        };
+        d.freq        = calcFreq(d);
+        d.contactType = calcContactType(d);
+        d.schedPri    = schedPri(d);
+        dealers.push(d);
+      }
+
+      loadedDealers = dealers;
+      allObjections = Object.keys(objSet).sort();
+
+      var wk = 0, mo = 0, ca = 0;
+      for(var di = 0; di < dealers.length; di++){
+        if(dealers[di].freq === 'Weekly') wk++;
+        else mo++;
+        if(dealers[di].contactType === 'call') ca++;
+      }
+
+      showFileStatus('✓ Loaded ' + dealers.length + ' dealers — ' +
+        wk + ' weekly, ' + mo + ' monthly, ' + ca + ' call-only', false);
+
+      var grid = document.getElementById('objection-toggles');
+      grid.innerHTML = '';
+      var defCheck = ['dealer watch list','salvage lot','bad dealer'];
+      for(var ai = 0; ai < allObjections.length; ai++){
+        var obj = allObjections[ai];
+        var isDef = false;
+        for(var dc = 0; dc < defCheck.length; dc++){
+          if(obj.toLowerCase().indexOf(defCheck[dc]) >= 0){ isDef = true; break; }
+        }
+        var sid = obj.replace(/\W/g,'_');
+        var div = document.createElement('div');
+        div.className = 'objection-toggle' + (isDef ? ' active' : '');
+        div.innerHTML = '<input type="checkbox" id="o_' + sid + '" value="' + obj + '"' +
+          (isDef ? ' checked' : '') +
+          ' onchange="this.closest(\'.objection-toggle\').classList.toggle(\'active\',this.checked)">' +
+          '<label for="o_' + sid + '" style="font-weight:normal;cursor:pointer;margin:0">' + obj + '</label>';
+        grid.appendChild(div);
+      }
+      if(!allObjections.length)
+        grid.innerHTML = '<span style="color:#9ca3af;font-size:13px">No objections found in file</span>';
+
+      document.getElementById('filter-section').style.display   = '';
+      document.getElementById('schedule-section').style.display = '';
+
+    } catch(err){
+      showFileStatus('Error reading file: ' + err.message, true);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function showFileStatus(msg, isError){
+  var el = document.getElementById('file-status');
+  el.className = isError ? 'error' : 'success';
+  el.textContent = msg;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// FILTERS
+// ─────────────────────────────────────────────────────────────────────
+function applyFilters(dealers){
+  var eqThresh  = parseFloat(document.getElementById('equityThreshold').value) || -20000;
+  var manRaw    = document.getElementById('manualRemove').value;
+  var manualIds = manRaw ? manRaw.split(',').map(function(s){return s.trim().toUpperCase();}).filter(Boolean) : [];
+  var checked   = document.querySelectorAll('#objection-toggles input:checked');
+  var badObjs   = [];
+  for(var ci = 0; ci < checked.length; ci++) badObjs.push(checked[ci].value.toLowerCase());
+
+  var ok=[], out=[];
+  for(var i = 0; i < dealers.length; i++){
+    var d        = dealers[i];
+    var play     = hasPlay(d);
+    var s        = clean(d.step);
+    var is0102   = s.startsWith('01') || s.startsWith('02');
+    var dealerId = clean(d.id).toUpperCase();
+
+    var removed = false;
+
+    if(manualIds.indexOf(dealerId) >= 0){
+      out.push({name:d.name,id:d.id,step:d.step,segment:d.segment,why:'Manually removed'});
+      removed = true;
+    }
+    if(!removed && !play && badObjs.length){
+      for(var bi = 0; bi < badObjs.length; bi++){
+        var found = false;
+        for(var oi = 0; oi < d.objections.length; oi++){
+          if(d.objections[oi].toLowerCase() === badObjs[bi]){ found = true; break; }
+        }
+        if(found){
+          out.push({name:d.name,id:d.id,step:d.step,segment:d.segment,why:'Objection: '+badObjs[bi]});
+          removed = true; break;
+        }
+      }
+    }
+    if(!removed && !play && is0102 && d.equity !== null && d.equity < eqThresh){
+      out.push({name:d.name,id:d.id,step:d.step,segment:d.segment,
+        why:'Equity ('+d.equity.toLocaleString()+') below threshold'});
+      removed = true;
+    }
+    if(!removed) ok.push(d);
+  }
+  return {ok:ok, out:out};
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// WORKDAYS
+// ─────────────────────────────────────────────────────────────────────
+function getWorkdays(year, month, blackouts){
+  var days=[], d=new Date(year, month, 1);
+  while(d.getMonth() === month){
+    if(d.getDay() !== 0 && d.getDay() !== 6){
+      var ds = (d.getMonth()+1)+'/'+d.getDate()+'/'+d.getFullYear();
+      if(blackouts.indexOf(ds) < 0) days.push(new Date(d));
+    }
+    d.setDate(d.getDate()+1);
+  }
+  return days;
+}
+
+function getWeeks(workdays){
+  var weeks=[], cur=[];
+  for(var i=0;i<workdays.length;i++){
+    cur.push(i);
+    if(workdays[i].getDay()===5 || i===workdays.length-1){
+      weeks.push(cur.slice()); cur=[];
+    }
+  }
+  return weeks;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// SCHEDULER
+// ─────────────────────────────────────────────────────────────────────
+function generateSchedule(){
+  if(!loadedDealers.length){
+    document.getElementById('schedule-output').innerHTML =
+      '<div class="error">Please upload your Excel file first.</div>'; return;
+  }
+
+  var filtered  = applyFilters(loadedDealers);
+  var active    = filtered.ok;
+  var removed   = filtered.out;
+
+  var monthVal  = document.getElementById('monthPicker').value.split('-');
+  var year      = parseInt(monthVal[0]), month = parseInt(monthVal[1]);
+  var blkRaw    = document.getElementById('blackouts').value;
+  var blackouts = blkRaw ? blkRaw.split(',').map(function(s){return s.trim();}).filter(Boolean) : [];
+  var CAP       = parseInt(document.getElementById('visitsPerDay').value) || 6;
+  var HCAP      = CAP + MAX_OVERFLOW;
+
+  var workdays  = getWorkdays(year, month-1, blackouts);
+  if(!workdays.length){
+    document.getElementById('schedule-output').innerHTML =
+      '<div class="error">No working days found. Check your blackout dates.</div>'; return;
+  }
+  var weeks = getWeeks(workdays);
+  var N     = workdays.length;
+
+  // Day arrays
+  var visits = [], calls = [];
+  for(var di=0;di<N;di++){ visits.push([]); calls.push([]); }
+
+  function vc(i){ return visits[i].length; }
+  function cc(i){ return calls[i].length; }
+  function tot(i){ return vc(i)+cc(i); }
+
+  function domCluster(i){
+    var all = visits[i].concat(calls[i]);
+    if(!all.length) return null;
+    var ct = {};
+    for(var ai=0;ai<all.length;ai++){
+      var cl = all[ai].dealer.cluster;
+      ct[cl] = (ct[cl]||0)+1;
+    }
+    var best=null, bestN=0;
+    var keys = Object.keys(ct);
+    for(var ki=0;ki<keys.length;ki++){
+      if(ct[keys[ki]]>bestN){ bestN=ct[keys[ki]]; best=keys[ki]; }
+    }
+    return best;
+  }
+
+  function geoScore(dealer, i){
+    var all = visits[i].concat(calls[i]);
+    if(!all.length) return 4;
+    var sum=0;
+    for(var ai=0;ai<all.length;ai++){
+      sum += clusterDist(dealer.cluster, all[ai].dealer.cluster);
+    }
+    var avgDist = sum/all.length;
+    return Math.max(0, 10 - avgDist*3);
+  }
+
+  function dealerOnDay(dealer, i){
+    var key = dealer.id || dealer.name;
+    var all = visits[i].concat(calls[i]);
+    for(var ai=0;ai<all.length;ai++){
+      if((all[ai].dealer.id||all[ai].dealer.name) === key) return true;
+    }
+    return false;
+  }
+
+  // ── FIND BEST VISIT DAY ──────────────────────────────────────────
+  function tryVisitDays(dealer, days, cap, maxDist){
+    var best=-1, bestScore=-Infinity;
+    for(var i=0;i<days.length;i++){
+      var di = days[i];
+      if(vc(di) >= cap)           continue;
+      if(tot(di) >= COMBINED_CAP) continue;
+      if(dealerOnDay(dealer,di))  continue;
+      var dom = domCluster(di);
+      if(dom !== null && clusterDist(dealer.cluster, dom) > maxDist) continue;
+      var score = geoScore(dealer,di) + (cap-vc(di))*0.2;
+      if(score > bestScore){ bestScore=score; best=di; }
+    }
+    return best;
+  }
+
+  function bestVisitDay(dealer, candidateDays, useHardCap){
+    var cap = useHardCap ? HCAP : CAP;
+    var r;
+    r = tryVisitDays(dealer, candidateDays, cap, 1);
+    if(r >= 0) return r;
+    r = tryVisitDays(dealer, candidateDays, cap, 2);
+    if(r >= 0) return r;
+    r = tryVisitDays(dealer, candidateDays, cap, 99);
+    return r;
+  }
+
+  // ── FIND BEST CALL DAY ───────────────────────────────────────────
+  function tryCallDays(dealer, days, maxDist){
+    var best=-1, bestScore=-Infinity;
+    for(var i=0;i<days.length;i++){
+      var di = days[i];
+      if(tot(di) >= COMBINED_CAP) continue;
+      if(dealerOnDay(dealer,di))  continue;
+      var dom = domCluster(di);
+      if(dom !== null && clusterDist(dealer.cluster, dom) > maxDist) continue;
+      var belowMin = tot(di) < MIN_PER_DAY ? 8 : 0;
+      var score = geoScore(dealer,di) + belowMin - tot(di)*0.2;
+      if(score > bestScore){ bestScore=score; best=di; }
+    }
+    return best;
+  }
+
+  function allDayIndices(){
+    var a=[];
+    for(var i=0;i<N;i++) a.push(i);
+    return a;
+  }
+
+  function bestCallDay(dealer, candidateDays){
+    var r;
+    r = tryCallDays(dealer, candidateDays, 1);
+    if(r >= 0) return r;
+    r = tryCallDays(dealer, candidateDays, 2);
+    if(r >= 0) return r;
+    r = tryCallDays(dealer, candidateDays, 99);
+    if(r >= 0) return r;
+    // Fallback: least busy day where dealer not already present
+    var all = allDayIndices();
+    var avail = [];
+    for(var i=0;i<all.length;i++){
+      if(!dealerOnDay(dealer,all[i])) avail.push(all[i]);
+    }
+    if(avail.length > 0){
+      avail.sort(function(a,b){ return tot(a)-tot(b); });
+      return avail[0];
+    }
+    return 0;
+  }
+
+  // ── BUILD APPOINTMENT LIST ───────────────────────────────────────
+  var appointments = [];
+  var sorted = active.slice().sort(function(a,b){ return a.schedPri - b.schedPri; });
+
+  for(var si=0;si<sorted.length;si++){
+    var dealer = sorted[si];
+    if(dealer.contactType === 'call'){
+      appointments.push({dealer:dealer, weekIdx:null, isCall:true, converted:false, lastResort:false});
+    } else if(dealer.freq === 'Weekly'){
+      for(var wi=0;wi<weeks.length;wi++){
+        appointments.push({dealer:dealer, weekIdx:wi, isCall:false, converted:false, lastResort:false});
+      }
+    } else {
+      appointments.push({dealer:dealer, weekIdx:null, isCall:false, converted:false, lastResort:false});
+    }
+  }
+
+  // ── ASSIGN EACH APPOINTMENT TO A DAY ────────────────────────────
+  var allIdx = allDayIndices();
+
+  for(var ai=0;ai<appointments.length;ai++){
+    var appt    = appointments[ai];
+    var dealer  = appt.dealer;
+    var weekIdx = appt.weekIdx;
+    var r;
+
+    if(appt.isCall){
+      r = bestCallDay(dealer, allIdx);
+      calls[r].push(appt);
+      continue;
+    }
+
+    var weekDays = weekIdx !== null ? weeks[weekIdx] : allIdx;
+
+    // Try 1: visit in candidate days at regular cap
+    r = bestVisitDay(dealer, weekDays, false);
+    if(r >= 0){ visits[r].push(appt); continue; }
+
+    // Try 2: weekly dealer overflows to any day at regular cap
+    if(weekIdx !== null){
+      r = bestVisitDay(dealer, allIdx, false);
+      if(r >= 0){ visits[r].push(appt); continue; }
+    }
+
+    // Try 3: priority dealers get hard cap
+    if(isPriority(dealer)){
+      r = bestVisitDay(dealer, allIdx, true);
+      if(r >= 0){ visits[r].push(appt); continue; }
+    }
+
+    // Try 4: green converts to call
+    if(isGreen(dealer)){
+      appt.isCall    = true;
+      appt.converted = true;
+      r = bestCallDay(dealer, allIdx);
+      calls[r].push(appt);
+      continue;
+    }
+
+    // Try 5: everyone else converts to call as last resort
+    appt.isCall     = true;
+    appt.lastResort = true;
+    r = bestCallDay(dealer, allIdx);
+    calls[r].push(appt);
+  }
+
+  // ── STATS ────────────────────────────────────────────────────────
+  var totV=0,totC=0,maxDay=0,belowDays=0,greenV=0,greenC=0,wkDlrs=0,moDlrs=0;
+  for(var i=0;i<N;i++){
+    totV += vc(i); totC += cc(i);
+    if(tot(i)>maxDay) maxDay=tot(i);
+    if(tot(i)<MIN_PER_DAY) belowDays++;
+    for(var vi=0;vi<visits[i].length;vi++){
+      if(isGreen(visits[i][vi].dealer)&&!visits[i][vi].converted) greenV++;
+    }
+    for(var ci=0;ci<calls[i].length;ci++){
+      if(isGreen(calls[i][ci].dealer)||calls[i][ci].converted) greenC++;
+    }
+  }
+  for(var ai=0;ai<active.length;ai++){
+    if(active[ai].freq==='Weekly'&&active[ai].contactType==='visit') wkDlrs++;
+    if(active[ai].freq==='Monthly'&&active[ai].contactType==='visit') moDlrs++;
+  }
+  var totAll = totV+totC;
+
+  document.getElementById('stats-section').style.display='';
+  document.getElementById('stats').innerHTML=
+    '<div class="stat-box"><div class="num">'+N+'</div><div class="lbl">Working Days</div></div>'+
+    '<div class="stat-box"><div class="num">'+totAll+'</div><div class="lbl">Total Contacts</div></div>'+
+    '<div class="stat-box"><div class="num">'+totV+'</div><div class="lbl">Visits</div></div>'+
+    '<div class="stat-box"><div class="num">'+totC+'</div><div class="lbl">Calls</div></div>'+
+    '<div class="stat-box"><div class="num">'+greenV+'</div><div class="lbl">Green Visits</div></div>'+
+    '<div class="stat-box"><div class="num">'+greenC+'</div><div class="lbl">Green Calls</div></div>'+
+    '<div class="stat-box"><div class="num">'+wkDlrs+'</div><div class="lbl">Weekly Dealers</div></div>'+
+    '<div class="stat-box"><div class="num">'+moDlrs+'</div><div class="lbl">Monthly Dealers</div></div>'+
+    '<div class="stat-box"><div class="num">'+(totAll/N).toFixed(1)+'</div><div class="lbl">Avg/Day</div></div>'+
+    '<div class="stat-box"><div class="num">'+maxDay+'</div><div class="lbl">Busiest Day</div></div>'+
+    '<div class="stat-box"><div class="num">'+belowDays+'</div><div class="lbl">Days Below Min</div></div>'+
+    '<div class="stat-box"><div class="num">'+removed.length+'</div><div class="lbl">Filtered Out</div></div>';
+
+  // ── RENDER ───────────────────────────────────────────────────────
+  var DNAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  var MNAMES = ['January','February','March','April','May','June',
+                'July','August','September','October','November','December'];
+
+  function segBadge(seg){
+    var m = {Red:'seg-red',Orange:'seg-orange',Yellow:'seg-yellow',
+             Green:'seg-green',High:'seg-high'};
+    var s = clean(seg);
+    if(!s) return '';
+    var cls = m[s] || 'seg-blank';
+    return '<span class="badge '+cls+'">'+s+'</span>';
+  }
+
+  function star(dealer){
+    var s = clean(dealer.segment).toLowerCase();
+    if(s==='orange'||s==='yellow'||s==='high')
+      return '<span class="priority-star">⭐</span>';
+    return '';
+  }
+
+  function typeBadge(appt){
+    if(appt.isCall || appt.converted || appt.lastResort)
+      return '<span class="badge badge-call">📞 Call</span>';
+    if(appt.dealer.freq === 'Weekly')
+      return '<span class="badge badge-weekly">Weekly</span>';
+    return '<span class="badge badge-monthly">Monthly</span>';
+  }
+
+  function apptRow(appt, cls, showDate, dateStr, clLabel, overCap, belowMin, visitCount){
+    var d = appt.dealer;
+    var dateCell = '';
+    if(showDate){
+      dateCell = '<strong>'+dateStr+'</strong>';
+      if(overCap) dateCell += ' <span style="font-size:10px;color:#f97316">⚠'+visitCount+'</span>';
+      if(belowMin) dateCell += ' <span style="font-size:10px;color:#dc2626">⚠min</span>';
+      dateCell += '<br><span style="font-size:10px;color:#6b7280">'+(clLabel||'—')+'</span>';
+    }
+    var converted = appt.converted
+      ? '<span style="font-size:10px;color:#059669;margin-left:4px">(converted)</span>' : '';
+    return '<tr class="'+cls+'">' +
+      '<td>'+dateCell+'</td>' +
+      '<td>'+star(d)+d.name+converted+'</td>' +
+      '<td style="font-size:11px;color:#6b7280">'+(d.id||'')+'</td>' +
+      '<td style="font-size:11px">'+(d.step||'')+'</td>' +
+      '<td>'+segBadge(d.segment)+'</td>' +
+      '<td>'+typeBadge(appt)+'</td>' +
+      '<td class="play-tag">'+(d.salesPlay||'')+'</td>' +
+      '</tr>';
+  }
+
+  var html = '<h2 style="margin-top:0">'+MNAMES[month-1]+' '+year+' — Visit &amp; Call Schedule</h2>' +
+    '<table><thead><tr>' +
+    '<th>Date</th><th>Dealer</th><th>ID</th><th>Step</th>' +
+    '<th>Segment</th><th>Type</th><th>Sales Play</th>' +
+    '</tr></thead><tbody>';
+
+  var lastWk=-1, dayColor=0;
+
+  for(var i=0;i<workdays.length;i++){
+    var day = workdays[i];
+    var wn  = -1;
+    for(var wki=0;wki<weeks.length;wki++){
+      if(weeks[wki].indexOf(i)>=0){ wn=wki; break; }
+    }
+
+    if(wn !== lastWk){
+      lastWk = wn;
+      var ws = workdays[weeks[wn][0]];
+      var we = workdays[weeks[wn][weeks[wn].length-1]];
+      html += '<tr class="week-divider"><td colspan="7">── Week '+(wn+1)+'&nbsp; '+
+        DNAMES[ws.getDay()]+' '+month+'/'+ws.getDate()+' – '+
+        DNAMES[we.getDay()]+' '+month+'/'+we.getDate()+
+        '&nbsp;('+weeks[wn].length+' day'+(weeks[wn].length!==1?'s':'')+') ──</td></tr>';
+    }
+
+    var dv  = visits[i], dc = calls[i];
+    var ds  = DNAMES[day.getDay()]+' '+month+'/'+day.getDate();
+    var cl  = domCluster(i);
+    var ov  = dv.length > CAP;
+    var bm  = tot(i) < MIN_PER_DAY;
+    var cls = dayColor%2===0 ? 'day-even' : 'day-odd';
+    dayColor++;
+
+    if(!tot(i)){
+      html += '<tr class="'+cls+'"><td><strong>'+ds+'</strong><br>' +
+        '<span style="font-size:10px;color:#9ca3af">'+(cl||'—')+'</span></td>' +
+        '<td colspan="6" style="color:#9ca3af;font-style:italic">No activity scheduled</td></tr>';
+    } else {
+      for(var vi=0;vi<dv.length;vi++){
+        html += apptRow(dv[vi], cls, vi===0, ds, cl, ov, bm, dv.length);
+      }
+      if(dc.length){
+        html += '<tr class="'+cls+'"><td colspan="7" style="padding-left:20px;' +
+          'font-size:11px;color:#4338ca;font-weight:bold;' +
+          'border-bottom:1px dashed #c7d2fe">📞 Calls</td></tr>';
+        for(var ci=0;ci<dc.length;ci++){
+          html += apptRow(dc[ci], cls, false, ds, cl, ov, bm, dv.length);
+        }
+      }
+    }
+  }
+  html += '</tbody></table>';
+
+  if(removed.length){
+    html += '<div class="unscheduled-section">' +
+      '<h3>🚫 Filtered Out ('+removed.length+')</h3>' +
+      '<table><thead><tr><th>Dealer</th><th>ID</th><th>Step</th>' +
+      '<th>Segment</th><th>Reason</th></tr></thead><tbody>';
+    for(var ri=0;ri<removed.length;ri++){
+      var rd = removed[ri];
+      html += '<tr>' +
+        '<td>'+(rd.name||'')+'</td>' +
+        '<td style="font-size:11px">'+(rd.id||'')+'</td>' +
+        '<td style="font-size:11px">'+(rd.step||'')+'</td>' +
+        '<td>'+segBadge(rd.segment)+'</td>' +
+        '<td style="font-size:11px;color:#991b1b">'+(rd.why||'')+'</td></tr>';
+    }
+    html += '</tbody></table></div>';
+  }
+
+  document.getElementById('schedule-output').innerHTML = html;
+}
+</script>
+</body>
+</html>
